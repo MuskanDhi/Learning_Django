@@ -1,5 +1,5 @@
 from django.shortcuts import render, redirect
-from .models import Room, Topic
+from .models import Room, Topic, Message
 from .forms import RoomForm
 from django.db.models import Q
 from django.contrib import messages
@@ -19,6 +19,14 @@ rooms = [
     {"id": 2, "name": "Room 2"},
     {"id": 3, "name": "Room 3"},
 ]
+
+def profilePage(request,pk):
+    user = User.objects.get(id=pk)
+    rooms = user.room_set.all()
+    room_messages = user.message_set.all()
+    topics = Topic.objects.all()
+    context = {'user': user, 'rooms': rooms,'room_messages': room_messages, 'topics': topics}
+    return render(request, 'playground/profile.html', context)
 
 def loginPage(request):
     page = 'login'
@@ -71,13 +79,26 @@ def home(request):
         )
     topics = Topic.objects.all()
     room_count = rooms.count()
-    context = {"rooms": rooms, "topics": topics, "room_count": room_count}
+    room_messages = Message.objects.filter(Q(room__topic__name__icontains=q))
+    context = {"rooms": rooms, "topics": topics, "room_count": room_count, "room_messages": room_messages}
     return render(request, "home.html", context)
 
 def room(request, pk):
     # Find the room based on the primary key
-    room = next((r for r in rooms if str(r["id"]) == pk), None)
-    return render(request, "room.html", {"room": room})
+    room = Room.objects.get(id=pk)
+    room_messages = room.message_set.all()
+    participants = room.participants.all()
+    if request.method == 'POST':
+        message = Message.objects.create(
+            user = request.user,
+            room = room,
+            body = request.POST.get('body')
+        )
+        room.participants.add(request.user)
+        return redirect('room', pk=room.id)
+    
+    context = {"room": room, "room_messages": room_messages, "participants": participants}
+    return render(request, "room.html", context)
 
 def calculate():
     x = 10 + 10
@@ -96,6 +117,8 @@ def createRoom(request):
     if request.method == 'POST':
         form = RoomForm(request.POST)
         if form.is_valid():
+            room = form.save(commit=False)
+            room.host = request.user
             form.save()
             return redirect('home')
     context = {'form':form}
@@ -130,3 +153,16 @@ def deleteRoom(request, pk):
         return redirect('home')
     
     return render(request,'playground/delete.html', {'obj': room})
+
+@login_required(login_url='login')
+def deleteMessage(request, pk):
+    message = Message.objects.get(id=pk)
+    
+    if request.user != message.user:
+        return HttpResponse('You are not allowed here!!')
+    
+    if request.method == 'POST':
+        message.delete()
+        return redirect('home')
+    
+    return render(request,'playground/delete.html', {'obj': message})
